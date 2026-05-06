@@ -86,24 +86,55 @@ export async function getProducts(req: Request, res: Response): Promise<void> {
 export async function getProduct(req: Request, res: Response): Promise<void> {
   try {
     const { id } = req.params;
-    const { data, error } = await supabaseAdmin
+
+    // Fetch product with category & room joins (these have proper FKs)
+    const { data: product, error } = await supabaseAdmin
       .from('products')
-      .select('*, categories(name, slug), rooms(name, slug), reviews(id, rating, comment, created_at, profiles(full_name, avatar_url))')
+      .select('*, categories(name, slug), rooms(name, slug)')
       .eq('id', id)
-      .single();
+      .maybeSingle();
 
-    if (error || !data) {
+    if (error) {
+      console.error('[getProduct] query error:', error);
+      res.status(500).json({ error: 'Failed to fetch product', details: error.message });
+      return;
+    }
+
+    if (!product) {
       res.status(404).json({ error: 'Product not found' });
       return;
     }
 
-    if (data.status === 'inactive' && (!req.user || req.user.role !== 'admin')) {
+    if (product.status === 'inactive' && (!req.user || req.user.role !== 'admin')) {
       res.status(404).json({ error: 'Product not found' });
       return;
     }
 
-    res.json(data);
-  } catch (err) {
+    // Fetch reviews separately (no implicit FK between reviews.user_id and profiles)
+    const { data: reviews } = await supabaseAdmin
+      .from('reviews')
+      .select('id, rating, comment, created_at, user_id')
+      .eq('product_id', id)
+      .order('created_at', { ascending: false });
+
+    let reviewsWithProfiles: any[] = [];
+    if (reviews && reviews.length > 0) {
+      const userIds = [...new Set(reviews.map(r => r.user_id))];
+      const { data: profiles } = await supabaseAdmin
+        .from('profiles')
+        .select('id, full_name, avatar_url')
+        .in('id', userIds);
+
+      const profileMap = new Map((profiles ?? []).map(p => [p.id, p]));
+      reviewsWithProfiles = reviews.map(r => ({
+        ...r,
+        profiles: profileMap.get(r.user_id) ?? { full_name: 'Anonymous', avatar_url: null },
+      }));
+    }
+
+    res.json({ ...product, reviews: reviewsWithProfiles });
+  } catch (err: any) {
+    console.error('[getProduct] unexpected error:', err);
     res.status(500).json({ error: 'Failed to fetch product' });
   }
 }

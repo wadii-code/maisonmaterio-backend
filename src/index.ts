@@ -45,9 +45,21 @@ app.get('/health', (_req, res) => {
 });
 
 // API routes
+// NOTE: Do NOT use app.get() cache headers here because productRoutes handles
+// GET /api/products internally (app.get runs only when no other handler matches).
+app.use((req, res, next) => {
+  if (req.path === '/api/products' || req.path.startsWith('/api/products/')) {
+    res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+  next();
+});
+
 app.use('/api/products', productRoutes);
 app.use('/api/categories', categoryRouter);
 app.use('/api/rooms', roomRouter);
+
 app.use('/api/orders', orderRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/customers', customerRoutes);
