@@ -33,7 +33,7 @@ export async function getOrders(req: Request, res: Response): Promise<void> {
 
     let query = supabaseAdmin
       .from('orders')
-      .select('*, order_items(*, products(name, images, price)), profiles(full_name, id)', { count: 'exact' });
+      .select('*, order_items(*, products(name, images, price, slug)), profiles!orders_user_id_fkey(full_name, id)', { count: 'exact' });
 
     // Customers only see their own orders
     if (req.user!.role !== 'admin') {
@@ -46,14 +46,18 @@ export async function getOrders(req: Request, res: Response): Promise<void> {
     query = query.order('created_at', { ascending: false }).range(from, to);
 
     const { data, error, count } = await query;
-    if (error) throw error;
+    if (error) {
+      console.error('[orders] getOrders error:', error.message, error.details, error.hint);
+      throw error;
+    }
 
     res.json({
       data,
       pagination: { page: pageNum, limit: limitNum, total: count ?? 0, pages: Math.ceil((count ?? 0) / limitNum) },
     });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch orders' });
+  } catch (err: any) {
+    console.error('[orders] getOrders caught:', err?.message);
+    res.status(500).json({ error: 'Failed to fetch orders', detail: err?.message });
   }
 }
 
@@ -62,7 +66,7 @@ export async function getOrder(req: Request, res: Response): Promise<void> {
     const { id } = req.params;
     let query = supabaseAdmin
       .from('orders')
-      .select('*, order_items(*, products(name, images, price, slug)), profiles(full_name, id)')
+      .select('*, order_items(*, products(name, images, price, slug)), profiles!orders_user_id_fkey(full_name, id)')
       .eq('id', id);
 
     if (req.user!.role !== 'admin') {
@@ -204,7 +208,7 @@ export async function getDashboardStats(req: Request, res: Response): Promise<vo
       supabaseAdmin.from('orders').select('id', { count: 'exact' }).gte('created_at', today.toISOString()),
       supabaseAdmin.from('orders').select('id', { count: 'exact' }).eq('status', 'pending'),
       supabaseAdmin.from('products').select('id', { count: 'exact' }).lt('stock', 10).eq('status', 'active'),
-      supabaseAdmin.from('orders').select('*, profiles(full_name)').order('created_at', { ascending: false }).limit(5),
+      supabaseAdmin.from('orders').select('*, profiles!orders_user_id_fkey(full_name)').order('created_at', { ascending: false }).limit(5),
     ]);
 
     const totalRevenue = (revenueResult.data ?? []).reduce((sum, o) => sum + (o.total_amount ?? 0), 0);

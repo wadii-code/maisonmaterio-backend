@@ -44,9 +44,7 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString(), service: 'swipo-api' });
 });
 
-// API routes
-// NOTE: Do NOT use app.get() cache headers here because productRoutes handles
-// GET /api/products internally (app.get runs only when no other handler matches).
+
 app.use((req, res, next) => {
   if (req.path === '/api/products' || req.path.startsWith('/api/products/')) {
     res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate');

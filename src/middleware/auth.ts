@@ -4,7 +4,8 @@ import { supabaseAdmin } from '../config/supabase';
 export async function authMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) {
-    res.status(401).json({ error: 'Missing or invalid authorization header' });
+    console.warn('[auth] Missing Authorization header on', req.method, req.path);
+    res.status(401).json({ error: 'Missing or invalid authorization header. Make sure you are signed in.' });
     return;
   }
 
@@ -12,7 +13,11 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
   const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
 
   if (error || !user) {
-    res.status(401).json({ error: 'Invalid or expired token' });
+    console.warn('[auth] Token rejected on', req.method, req.path, '— reason:', error?.message ?? 'no user returned');
+    res.status(401).json({
+      error: 'Invalid or expired session. Please sign out and sign in again.',
+      detail: error?.message,
+    });
     return;
   }
 

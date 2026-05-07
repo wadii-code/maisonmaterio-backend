@@ -16,6 +16,11 @@ const productSchema = z.object({
   status: z.enum(['active', 'inactive']).default('active'),
   images: z.array(z.string()).default([]),
   tags: z.array(z.string()).default([]),
+  colors: z.array(z.object({
+    name: z.string().min(1),
+    hex: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'hex must be #RRGGBB'),
+    price_delta: z.number().default(0),
+  })).default([]),
 });
 
 export async function getProducts(req: Request, res: Response): Promise<void> {
