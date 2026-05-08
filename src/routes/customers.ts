@@ -18,13 +18,14 @@ router.get('/', authMiddleware, adminMiddleware, async (_req: Request, res: Resp
     const userIds = (profiles ?? []).map(p => p.id);
     const { data: orderStats } = await supabaseAdmin
       .from('orders')
-      .select('user_id, total_amount, status')
+      .select('user_id, total_amount, status, payment_status')
       .in('user_id', userIds);
 
+    const COUNTED_STATUSES = ['shipped', 'delivered'];
     const stats = (orderStats ?? []).reduce<Record<string, { orders: number; spent: number }>>((acc, o) => {
       if (!acc[o.user_id]) acc[o.user_id] = { orders: 0, spent: 0 };
       acc[o.user_id].orders += 1;
-      if (o.status !== 'cancelled') acc[o.user_id].spent += Number(o.total_amount);
+      if (COUNTED_STATUSES.includes(o.status)) acc[o.user_id].spent += Number(o.total_amount);
       return acc;
     }, {});
 
@@ -48,11 +49,12 @@ router.get('/revenue', authMiddleware, adminMiddleware, async (req: Request, res
     since.setDate(since.getDate() - days);
     since.setHours(0, 0, 0, 0);
 
+    // Same rule as dashboard total: only shipped or delivered orders count.
     const { data, error } = await supabaseAdmin
       .from('orders')
       .select('total_amount, created_at, status')
       .gte('created_at', since.toISOString())
-      .neq('status', 'cancelled')
+      .in('status', ['shipped', 'delivered'])
       .order('created_at', { ascending: true });
 
     if (error) throw error;

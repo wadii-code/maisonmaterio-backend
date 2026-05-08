@@ -13,11 +13,19 @@ const shippingAddressSchema = z.object({
   phone: z.string().optional(),
 });
 
+const customizationSchema = z.object({
+  color: z.object({
+    name: z.string().min(1).max(50),
+    hex: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  }).optional(),
+  unitPrice: z.number().nonnegative().nullable().optional(),
+}).passthrough().optional();
+
 const createOrderSchema = z.object({
   items: z.array(z.object({
     product_id: z.string().uuid(),
     quantity: z.number().int().positive(),
-    customization: z.record(z.string()).optional(),
+    customization: customizationSchema,
   })).min(1),
   shipping_address: shippingAddressSchema,
   payment_method: z.literal('cod').default('cod'),
@@ -95,11 +103,12 @@ export async function createOrder(req: Request, res: Response): Promise<void> {
 
     const { items, shipping_address } = parsed.data;
 
-    // Fetch product prices and check stock
+    // Fetch product prices/colors and check stock. We re-derive prices on the server
+    // so a tampered client can't pay less than the real price.
     const productIds = items.map(i => i.product_id);
     const { data: products, error: productsError } = await supabaseAdmin
       .from('products')
-      .select('id, name, price, discount_price, stock, status')
+      .select('id, name, price, discount_price, stock, status, colors')
       .in('id', productIds)
       .eq('status', 'active');
 
@@ -109,20 +118,41 @@ export async function createOrder(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    // Validate stock
+    // Aggregate quantity per product (a single product can appear twice in different colors)
+    const totalQtyByProduct = new Map<string, number>();
     for (const item of items) {
-      const product = products.find(p => p.id === item.product_id);
-      if (!product || product.stock < item.quantity) {
-        res.status(400).json({ error: `Insufficient stock for product ${product?.name ?? item.product_id}` });
+      totalQtyByProduct.set(
+        item.product_id,
+        (totalQtyByProduct.get(item.product_id) ?? 0) + item.quantity,
+      );
+    }
+
+    // Validate stock based on aggregated qty
+    for (const [productId, qty] of totalQtyByProduct) {
+      const product = products.find(p => p.id === productId);
+      if (!product || product.stock < qty) {
+        res.status(400).json({ error: `Insufficient stock for product ${product?.name ?? productId}` });
         return;
       }
     }
 
-    // Calculate total
-    const total_amount = items.reduce((sum, item) => {
+    // Compute server-trusted unit price per line including color delta
+    const lineUnitPrice = (item: typeof items[number]): { unit: number; matchedColor?: { name: string; hex: string; price_delta: number } } => {
       const product = products.find(p => p.id === item.product_id)!;
-      const price = product.discount_price ?? product.price;
-      return sum + price * item.quantity;
+      const base = product.discount_price ?? product.price;
+      const requestedHex = item.customization?.color?.hex;
+      if (!requestedHex) return { unit: Number(base) };
+      const colors: Array<{ name: string; hex: string; price_delta: number }> = (product.colors as any) ?? [];
+      const matched = colors.find(c => c.hex.toLowerCase() === requestedHex.toLowerCase());
+      // If the client claimed a color that doesn't exist on the product, ignore the delta
+      const delta = matched?.price_delta ?? 0;
+      return { unit: Number(base) + Number(delta), matchedColor: matched };
+    };
+
+    // Calculate total from server-derived unit prices
+    const total_amount = items.reduce((sum, item) => {
+      const { unit } = lineUnitPrice(item);
+      return sum + unit * item.quantity;
     }, 0);
 
     // Create order
@@ -141,14 +171,18 @@ export async function createOrder(req: Request, res: Response): Promise<void> {
 
     if (orderError) throw orderError;
 
-    // Create order items
+    // Create order items, persisting customization for traceability
     const orderItems = items.map(item => {
-      const product = products.find(p => p.id === item.product_id)!;
+      const { unit, matchedColor } = lineUnitPrice(item);
+      const customizationToStore = matchedColor
+        ? { color: { name: matchedColor.name, hex: matchedColor.hex } }
+        : null;
       return {
         order_id: order.id,
         product_id: item.product_id,
         quantity: item.quantity,
-        price_at_time: product.discount_price ?? product.price,
+        price_at_time: unit,
+        customization: customizationToStore,
       };
     });
 
@@ -172,23 +206,71 @@ export async function createOrder(req: Request, res: Response): Promise<void> {
 export async function updateOrderStatus(req: Request, res: Response): Promise<void> {
   try {
     const { id } = req.params;
-    const { status, notes } = req.body;
+    const { status, notes, payment_status } = req.body;
 
     const validStatuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
-    if (!validStatuses.includes(status)) {
+    if (status && !validStatuses.includes(status)) {
       res.status(400).json({ error: 'Invalid status' });
       return;
     }
 
+    const validPaymentStatuses = ['pending', 'paid', 'failed', 'refunded'];
+    if (payment_status && !validPaymentStatuses.includes(payment_status)) {
+      res.status(400).json({ error: 'Invalid payment status' });
+      return;
+    }
+
+    // Load the existing order to enforce authorization rules
+    const { data: existing, error: loadErr } = await supabaseAdmin
+      .from('orders')
+      .select('id, user_id, status')
+      .eq('id', id)
+      .single();
+
+    if (loadErr || !existing) {
+      res.status(404).json({ error: 'Order not found' });
+      return;
+    }
+
+    const isAdmin = req.user!.role === 'admin';
+    const isOwner = existing.user_id === req.user!.id;
+
+    // Customer rules: can only cancel their own pending order; cannot change payment_status.
+    if (!isAdmin) {
+      if (!isOwner) {
+        res.status(403).json({ error: 'Forbidden' });
+        return;
+      }
+      if (payment_status) {
+        res.status(403).json({ error: 'Only admins can change payment status' });
+        return;
+      }
+      if (status !== 'cancelled' || existing.status !== 'pending') {
+        res.status(403).json({ error: 'You can only cancel an order while it is still pending.' });
+        return;
+      }
+    }
+
+    const updates: Record<string, any> = { updated_at: new Date().toISOString() };
+    if (status) updates.status = status;
+    if (notes !== undefined) updates.notes = notes;
+    if (payment_status && isAdmin) updates.payment_status = payment_status;
+
+    // Auto-flip payment_status to 'paid' when admin marks COD order as delivered
+    // (unless they explicitly passed a different payment_status).
+    if (isAdmin && status === 'delivered' && !payment_status) {
+      updates.payment_status = 'paid';
+    }
+
     const { data, error } = await supabaseAdmin
       .from('orders')
-      .update({ status, notes, updated_at: new Date().toISOString() })
+      .update(updates)
       .eq('id', id)
       .select()
       .single();
 
     if (error || !data) {
-      res.status(404).json({ error: 'Order not found' });
+      res.status(500).json({ error: 'Failed to update order status' });
       return;
     }
 
@@ -203,15 +285,20 @@ export async function getDashboardStats(req: Request, res: Response): Promise<vo
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    // Revenue rule: only shipped or delivered orders count.
     const [revenueResult, ordersResult, pendingResult, lowStockResult, recentOrdersResult] = await Promise.all([
-      supabaseAdmin.from('orders').select('total_amount').eq('payment_status', 'paid'),
+      supabaseAdmin
+        .from('orders')
+        .select('total_amount')
+        .in('status', ['shipped', 'delivered']),
       supabaseAdmin.from('orders').select('id', { count: 'exact' }).gte('created_at', today.toISOString()),
       supabaseAdmin.from('orders').select('id', { count: 'exact' }).eq('status', 'pending'),
       supabaseAdmin.from('products').select('id', { count: 'exact' }).lt('stock', 10).eq('status', 'active'),
       supabaseAdmin.from('orders').select('*, profiles!orders_user_id_fkey(full_name)').order('created_at', { ascending: false }).limit(5),
     ]);
 
-    const totalRevenue = (revenueResult.data ?? []).reduce((sum, o) => sum + (o.total_amount ?? 0), 0);
+    const totalRevenue = (revenueResult.data ?? [])
+      .reduce((sum, o) => sum + Number(o.total_amount ?? 0), 0);
 
     res.json({
       total_revenue: totalRevenue,

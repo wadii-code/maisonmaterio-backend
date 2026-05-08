@@ -55,8 +55,32 @@ export async function getProducts(req: Request, res: Response): Promise<void> {
       query = query.eq('status', status as string);
     }
 
-    if (category) query = query.eq('categories.slug', category as string);
-    if (room) query = query.eq('rooms.slug', room as string);
+    // Filter by category slug — resolve to category_id first since `query.eq('categories.slug', ...)`
+    // only filters the embedded join object, not the parent rows.
+    if (category) {
+      const { data: cat } = await supabaseAdmin
+        .from('categories')
+        .select('id')
+        .eq('slug', category as string)
+        .maybeSingle();
+      if (!cat) {
+        res.json({ data: [], pagination: { page: pageNum, limit: limitNum, total: 0, pages: 0 } });
+        return;
+      }
+      query = query.eq('category_id', cat.id);
+    }
+    if (room) {
+      const { data: rm } = await supabaseAdmin
+        .from('rooms')
+        .select('id')
+        .eq('slug', room as string)
+        .maybeSingle();
+      if (!rm) {
+        res.json({ data: [], pagination: { page: pageNum, limit: limitNum, total: 0, pages: 0 } });
+        return;
+      }
+      query = query.eq('room_id', rm.id);
+    }
     if (min_price) query = query.gte('price', parseFloat(min_price as string));
     if (max_price) query = query.lte('price', parseFloat(max_price as string));
     if (tags) {
@@ -118,8 +142,9 @@ export async function getProduct(req: Request, res: Response): Promise<void> {
     // Fetch reviews separately (no implicit FK between reviews.user_id and profiles)
     const { data: reviews } = await supabaseAdmin
       .from('reviews')
-      .select('id, rating, comment, created_at, user_id')
+      .select('id, rating, comment, created_at, user_id, status')
       .eq('product_id', id)
+      .eq('status', 'published')
       .order('created_at', { ascending: false });
 
     let reviewsWithProfiles: any[] = [];

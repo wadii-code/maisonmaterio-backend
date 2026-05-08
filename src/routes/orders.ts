@@ -15,6 +15,8 @@ router.get('/dashboard-stats', authMiddleware, adminMiddleware, getDashboardStat
 router.get('/', authMiddleware, getOrders);
 router.get('/:id', authMiddleware, getOrder);
 router.post('/', authMiddleware, createOrder);
-router.put('/:id/status', authMiddleware, adminMiddleware, updateOrderStatus);
+// Customers can cancel their own pending orders; admins can change anything.
+// Authorization is enforced inside the controller.
+router.put('/:id/status', authMiddleware, updateOrderStatus);
 
 export default router;

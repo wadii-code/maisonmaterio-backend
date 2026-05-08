@@ -19,7 +19,7 @@ export async function getReviewEligibility(req: Request, res: Response): Promise
       .select('id, orders!inner(status, user_id)')
       .eq('product_id', productId)
       .eq('orders.user_id', userId)
-      .eq('orders.status', 'delivered');
+      .in('orders.status', ['shipped', 'delivered']);
 
     const has_purchased = (orders?.length ?? 0) > 0;
 
@@ -60,10 +60,10 @@ export async function createReview(req: Request, res: Response): Promise<void> {
       .select('id, orders!inner(status, user_id)')
       .eq('product_id', product_id)
       .eq('orders.user_id', userId)
-      .eq('orders.status', 'delivered');
+      .in('orders.status', ['shipped', 'delivered']);
 
     if (!orders || orders.length === 0) {
-      res.status(403).json({ error: 'You must purchase this product before reviewing it' });
+      res.status(403).json({ error: 'You can review this product once it has been shipped or delivered.' });
       return;
     }
 
