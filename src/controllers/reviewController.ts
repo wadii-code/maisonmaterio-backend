@@ -83,7 +83,14 @@ export async function createReview(req: Request, res: Response): Promise<void> {
     // Insert review
     const { data, error } = await supabaseAdmin
       .from('reviews')
-      .insert({ product_id, user_id: userId, rating, comment })
+      .insert({
+        product_id,
+        user_id: userId,
+        rating,
+        comment,
+        // Ensure admin listing can see the new review even if the DB expects a value
+        status: 'active',
+      })
       .select()
       .single();
 
