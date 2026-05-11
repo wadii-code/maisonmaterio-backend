@@ -44,6 +44,10 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString(), service: 'swipo-api' });
 });
 
+// Root route
+app.get('/', (_req, res) => {
+  res.json({ message: 'Welcome to the SWIPO API!' });
+});
 
 app.use((req, res, next) => {
   if (req.path === '/api/products' || req.path.startsWith('/api/products/')) {
