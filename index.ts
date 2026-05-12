@@ -5,11 +5,11 @@ import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 
-import productRoutes from './routes/products';
-import orderRoutes from './routes/orders';
-import reviewRoutes from './routes/reviews';
-import customerRoutes from './routes/customers';
-import { categoryRouter, roomRouter } from './routes/categories';
+import productRoutes from './api/routes/products';
+import orderRoutes from './api/routes/orders';
+import reviewRoutes from './api/routes/reviews';
+import customerRoutes from './api/routes/customers';
+import { categoryRouter, roomRouter } from './api/routes/categories';
 
 dotenv.config();
 
