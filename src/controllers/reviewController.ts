@@ -88,8 +88,6 @@ export async function createReview(req: Request, res: Response): Promise<void> {
         user_id: userId,
         rating,
         comment,
-        // Ensure admin listing can see the new review even if the DB expects a value
-        status: 'active',
       })
       .select()
       .single();
@@ -120,14 +118,22 @@ export async function createReview(req: Request, res: Response): Promise<void> {
 
 export async function getAdminReviews(_req: Request, res: Response): Promise<void> {
   try {
+    // Explicitly join `profiles` using the `user_id` column.
+    // Supabase/PostgREST can't infer the join because the FK is not directly to the `profiles` table.
     const { data, error } = await supabaseAdmin
       .from('reviews')
-      .select('*, profiles(full_name, avatar_url), products(name, images)')
+      .select('*, profiles:user_id(full_name, avatar_url), products(name, images)')
       .order('created_at', { ascending: false });
 
-    if (error) throw error;
+    if (error) {
+      // This will now log the specific database error to the backend console.
+      console.error('Supabase error fetching admin reviews:', error);
+      throw error;
+    }
+
     res.json(data);
-  } catch (err) {
+  } catch (err: any) {
+    console.error('Error in getAdminReviews controller:', err.message);
     res.status(500).json({ error: 'Failed to fetch reviews' });
   }
 }

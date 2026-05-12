@@ -41,7 +41,7 @@ export async function getOrders(req: Request, res: Response): Promise<void> {
 
     let query = supabaseAdmin
       .from('orders')
-      .select('*, order_items(*, products(name, images, price, slug)), profiles!orders_user_id_fkey(full_name, id)', { count: 'exact' });
+      .select('*, order_items(*, products(name, images, price, slug)), profiles!orders_user_id_fkey(full_name, id, phone)', { count: 'exact' });
 
     // Customers only see their own orders
     if (req.user!.role !== 'admin') {
@@ -74,7 +74,7 @@ export async function getOrder(req: Request, res: Response): Promise<void> {
     const { id } = req.params;
     let query = supabaseAdmin
       .from('orders')
-      .select('*, order_items(*, products(name, images, price, slug)), profiles!orders_user_id_fkey(full_name, id)')
+      .select('*, order_items(*, products(name, images, price, slug)), profiles!orders_user_id_fkey(full_name, id, phone)')
       .eq('id', id);
 
     if (req.user!.role !== 'admin') {
@@ -290,7 +290,7 @@ export async function getDashboardStats(req: Request, res: Response): Promise<vo
       supabaseAdmin
         .from('orders')
         .select('total_amount')
-        .in('status', ['shipped', 'delivered']),
+        .eq('payment_status', 'paid'),
       supabaseAdmin.from('orders').select('id', { count: 'exact' }).gte('created_at', today.toISOString()),
       supabaseAdmin.from('orders').select('id', { count: 'exact' }).eq('status', 'pending'),
       supabaseAdmin.from('products').select('id', { count: 'exact' }).lt('stock', 10).eq('status', 'active'),

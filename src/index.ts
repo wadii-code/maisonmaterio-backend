@@ -27,7 +27,7 @@ app.use(cors({
 }));
 
 // Rate limiting
-app.use('/api/', rateLimit({
+app.use('/', rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 200,
   message: 'Too many requests, please try again later.',
@@ -53,7 +53,7 @@ app.get('/', (_req, res) => {
 });
 
 app.use((req, res, next) => {
-  if (req.path === '/api/products' || req.path.startsWith('/api/products/')) {
+  if (req.path === '/products' || req.path.startsWith('/products/')) {
     res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
@@ -61,13 +61,13 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use('/api/products', productRoutes);
-app.use('/api/categories', categoryRouter);
-app.use('/api/rooms', roomRouter);
+app.use('/products', productRoutes);
+app.use('/categories', categoryRouter);
+app.use('/rooms', roomRouter);
 
-app.use('/api/orders', orderRoutes);
-app.use('/api/reviews', reviewRoutes);
-app.use('/api/customers', customerRoutes);
+app.use('/orders', orderRoutes);
+app.use('/reviews', reviewRoutes);
+app.use('/customers', customerRoutes);
 
 // 404 handler
 app.use((_req, res) => {
