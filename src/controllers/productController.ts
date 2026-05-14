@@ -21,6 +21,10 @@ const productSchema = z.object({
     hex: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'hex must be #RRGGBB'),
     price_delta: z.number().default(0),
   })).default([]),
+  // SEO fields — all optional, support long-form content.
+  seo_description: z.string().max(10000).optional().nullable(),
+  meta_title: z.string().max(200).optional().nullable(),
+  meta_description: z.string().max(500).optional().nullable(),
 });
 
 export async function getProducts(req: Request, res: Response): Promise<void> {
