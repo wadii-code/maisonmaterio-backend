@@ -3,14 +3,15 @@ import { supabaseAdmin } from '../config/supabase';
 import { z } from 'zod';
 
 const shippingAddressSchema = z.object({
+  // Only name, city and phone are mandatory. Everything else is optional.
   full_name: z.string().min(1),
-  address_line1: z.string().min(1),
-  address_line2: z.string().optional(),
   city: z.string().min(1),
-  state: z.string().min(1),
-  postal_code: z.string().min(1),
-  country: z.string().min(1),
-  phone: z.string().optional(),
+  phone: z.string().min(1),
+  address_line1: z.string().optional().default(''),
+  address_line2: z.string().optional().default(''),
+  state: z.string().optional().default(''),
+  postal_code: z.string().optional().default(''),
+  country: z.string().optional().default(''),
 });
 
 const customizationSchema = z.object({
@@ -136,7 +137,9 @@ export async function createOrder(req: Request, res: Response): Promise<void> {
       }
     }
 
-    // Compute server-trusted unit price per line including color delta
+    // Compute server-trusted unit price per line.
+    // Convention: `colors[].price_delta` is the FINAL price for that color (not a delta).
+    // If it's 0 / missing, fall back to the product's base price.
     const lineUnitPrice = (item: typeof items[number]): { unit: number; matchedColor?: { name: string; hex: string; price_delta: number } } => {
       const product = products.find(p => p.id === item.product_id)!;
       const base = product.discount_price ?? product.price;
@@ -144,9 +147,9 @@ export async function createOrder(req: Request, res: Response): Promise<void> {
       if (!requestedHex) return { unit: Number(base) };
       const colors: Array<{ name: string; hex: string; price_delta: number }> = (product.colors as any) ?? [];
       const matched = colors.find(c => c.hex.toLowerCase() === requestedHex.toLowerCase());
-      // If the client claimed a color that doesn't exist on the product, ignore the delta
-      const delta = matched?.price_delta ?? 0;
-      return { unit: Number(base) + Number(delta), matchedColor: matched };
+      const colorPrice = Number(matched?.price_delta ?? 0);
+      const unit = colorPrice > 0 ? colorPrice : Number(base);
+      return { unit, matchedColor: matched };
     };
 
     // Calculate total from server-derived unit prices

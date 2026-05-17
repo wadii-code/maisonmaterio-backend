@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
+import { isSuperAdmin } from '../middleware/admin';
 import { z } from 'zod';
 
 const productSchema = z.object({
@@ -41,6 +42,7 @@ export async function getProducts(req: Request, res: Response): Promise<void> {
       order = 'desc',
       search,
       status,
+      mine,
     } = req.query;
 
     const pageNum = Math.max(1, parseInt(page as string));
@@ -52,11 +54,19 @@ export async function getProducts(req: Request, res: Response): Promise<void> {
       .from('products')
       .select('*, categories(name, slug), rooms(name, slug)', { count: 'exact' });
 
-    // Non-admins only see active products
-    if (!req.user || req.user.role !== 'admin') {
+    // Non-admins (and signed-out users) only see active products
+    const isAdminRole = req.user && (isSuperAdmin(req.user.role) || req.user.role === 'sub_admin');
+    if (!isAdminRole) {
       query = query.eq('status', 'active');
     } else if (status) {
       query = query.eq('status', status as string);
+    }
+
+    // Ownership filter only applies when the admin UI asks for it via ?mine=1.
+    // This way the public storefront keeps showing every product, regardless of
+    // whether the current viewer happens to be a logged-in sub_admin.
+    if (mine === '1' && req.user?.id) {
+      query = query.eq('created_by', req.user.id);
     }
 
     // Filter by category slug — resolve to category_id first since `query.eq('categories.slug', ...)`
@@ -189,9 +199,12 @@ export async function createProduct(req: Request, res: Response): Promise<void> 
         .replace(/(^-|-$)/g, '');
     }
 
+    // Stamp the creator so we can enforce per-admin ownership later.
+    const payload: any = { ...productData, created_by: req.user!.id };
+
     const { data, error } = await supabaseAdmin
       .from('products')
-      .insert(productData)
+      .insert(payload)
       .select()
       .single();
 
@@ -219,9 +232,30 @@ export async function updateProduct(req: Request, res: Response): Promise<void> 
       return;
     }
 
+    // Ownership check — sub-admins can only update products they created.
+    if (!isSuperAdmin(req.user?.role)) {
+      const { data: existing } = await supabaseAdmin
+        .from('products')
+        .select('created_by')
+        .eq('id', id)
+        .maybeSingle();
+      if (!existing) {
+        res.status(404).json({ error: 'Product not found' });
+        return;
+      }
+      if (existing.created_by !== req.user!.id) {
+        res.status(403).json({ error: 'You can only modify products you have created.' });
+        return;
+      }
+    }
+
+    // A sub-admin must never be able to reassign ownership.
+    const updates: any = { ...parsed.data, updated_at: new Date().toISOString() };
+    if (!isSuperAdmin(req.user?.role)) delete updates.created_by;
+
     const { data, error } = await supabaseAdmin
       .from('products')
-      .update({ ...parsed.data, updated_at: new Date().toISOString() })
+      .update(updates)
       .eq('id', id)
       .select()
       .single();
@@ -240,6 +274,24 @@ export async function updateProduct(req: Request, res: Response): Promise<void> 
 export async function deleteProduct(req: Request, res: Response): Promise<void> {
   try {
     const { id } = req.params;
+
+    // Ownership check — sub-admins can only delete products they created.
+    if (!isSuperAdmin(req.user?.role)) {
+      const { data: existing } = await supabaseAdmin
+        .from('products')
+        .select('created_by')
+        .eq('id', id)
+        .maybeSingle();
+      if (!existing) {
+        res.status(404).json({ error: 'Product not found' });
+        return;
+      }
+      if (existing.created_by !== req.user!.id) {
+        res.status(403).json({ error: 'You can only delete products you have created.' });
+        return;
+      }
+    }
+
     const { error } = await supabaseAdmin.from('products').delete().eq('id', id);
     if (error) throw error;
     res.status(204).send();

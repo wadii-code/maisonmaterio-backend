@@ -9,6 +9,7 @@ import productRoutes from '../src/routes/products';
 import orderRoutes from '../src/routes/orders';
 import reviewRoutes from '../src/routes/reviews';
 import customerRoutes from '../src/routes/customers';
+import adminRoutes from '../src/routes/admins';
 import { categoryRouter, roomRouter } from '../src/routes/categories';
 
 dotenv.config();
@@ -49,7 +50,7 @@ app.get('/health', (_req, res) => {
 
 // Root route
 app.get('/', (_req, res) => {
-  res.json({ message: 'Welcome to the SWIPO API!' });
+  res.json({ message: 'Welcome to the Maison Materiau API!' });
 });
 
 app.use((req, res, next) => {
@@ -68,6 +69,7 @@ app.use('/rooms', roomRouter);
 app.use('/orders', orderRoutes);
 app.use('/reviews', reviewRoutes);
 app.use('/customers', customerRoutes);
+app.use('/admins', adminRoutes);
 
 // 404 handler
 app.use((_req, res) => {
@@ -81,7 +83,7 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 SWIPO API running on port ${PORT}`);
+  console.log(`🚀 Maison Materio API running on port ${PORT}`);
   console.log(`📦 Environment: ${process.env.NODE_ENV ?? 'development'}`);
 });
 
