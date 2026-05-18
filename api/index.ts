@@ -19,11 +19,30 @@ const PORT = process.env.PORT ?? 3001;
 
 // Security middleware
 app.use(helmet());
+
+// CORS — explicit allow-list of every storefront origin that may call this API.
+// Adding the custom domain (with and without `www`) plus the Vercel preview URLs.
+// Additional origins can be added at runtime via the `FRONTEND_URL` env var
+// (comma-separated for multiple values).
+const allowedOrigins = new Set<string>([
+  'http://localhost:5173',
+  'http://localhost:4173',
+  'https://maisonmaterio-frontend.vercel.app',
+  'https://maisonmateriau.com',
+  'https://www.maisonmateriau.com',
+  ...(process.env.FRONTEND_URL?.split(',').map(s => s.trim()).filter(Boolean) ?? []),
+]);
+
 app.use(cors({
-  origin: [
-    process.env.FRONTEND_URL ?? 'http://localhost:5173',
-    'https://maisonmaterio-frontend.vercel.app'
-  ],
+  origin: (origin, callback) => {
+    // Allow no-origin requests (curl, server-to-server, health checks).
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.has(origin)) return callback(null, true);
+    // Also accept any *.vercel.app preview URL for this project so PR previews work.
+    if (/\.vercel\.app$/.test(new URL(origin).hostname)) return callback(null, true);
+    console.warn('[cors] rejected origin:', origin);
+    return callback(new Error(`Origin ${origin} is not allowed by CORS policy`));
+  },
   credentials: true,
 }));
 
