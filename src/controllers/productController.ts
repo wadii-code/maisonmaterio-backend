@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
-import { isSuperAdmin } from '../middleware/admin';
+import { isSuperAdmin, isAnyAdmin } from '../middleware/admin';
 import { z } from 'zod';
 
 const productSchema = z.object({
@@ -148,7 +148,7 @@ export async function getProduct(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    if (product.status === 'inactive' && (!req.user || req.user.role !== 'admin')) {
+    if (product.status === 'inactive' && (!req.user || !isAnyAdmin(req.user.role))) {
       res.status(404).json({ error: 'Product not found' });
       return;
     }

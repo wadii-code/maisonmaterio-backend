@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
+import { isSuperAdmin } from '../middleware/admin';
 import { z } from 'zod';
 
 const shippingAddressSchema = z.object({
@@ -45,8 +46,8 @@ export async function getOrders(req: Request, res: Response): Promise<void> {
       .from('orders')
       .select('*, order_items(*, products(name, images, price, slug)), profiles!orders_user_id_fkey(full_name, id, phone)', { count: 'exact' });
 
-    // Customers only see their own orders
-    if (req.user!.role !== 'admin') {
+    // Super-admins see every order; everyone else only sees their own.
+    if (!isSuperAdmin(req.user!.role)) {
       query = query.eq('user_id', req.user!.id);
     }
 
@@ -79,7 +80,7 @@ export async function getOrder(req: Request, res: Response): Promise<void> {
       .select('*, order_items(*, products(name, images, price, slug)), profiles!orders_user_id_fkey(full_name, id, phone)')
       .eq('id', id);
 
-    if (req.user!.role !== 'admin') {
+    if (!isSuperAdmin(req.user!.role)) {
       query = query.eq('user_id', req.user!.id);
     }
 
@@ -237,7 +238,7 @@ export async function updateOrderStatus(req: Request, res: Response): Promise<vo
       return;
     }
 
-    const isAdmin = req.user!.role === 'admin';
+    const isAdmin = isSuperAdmin(req.user!.role);
     const isOwner = existing.user_id === req.user!.id;
 
     // Customer rules: can only cancel their own pending order; cannot change payment_status.
