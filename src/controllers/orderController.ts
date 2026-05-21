@@ -30,6 +30,7 @@ const createOrderSchema = z.object({
   })).min(1),
   shipping_address: shippingAddressSchema,
   payment_method: z.literal('cod').default('cod'),
+  guest_email: z.string().email().optional(),
 });
 
 export async function getOrders(req: Request, res: Response): Promise<void> {
@@ -102,7 +103,7 @@ export async function createOrder(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const { items, shipping_address } = parsed.data;
+    const { items, shipping_address, guest_email } = parsed.data;
 
     // Fetch product prices/colors and check stock. We re-derive prices on the server
     // so a tampered client can't pay less than the real price.
@@ -158,11 +159,12 @@ export async function createOrder(req: Request, res: Response): Promise<void> {
       return sum + unit * item.quantity;
     }, 0);
 
-    // Create order
+    // Create order. user_id is null for guest checkouts.
     const { data: order, error: orderError } = await supabaseAdmin
       .from('orders')
       .insert({
-        user_id: req.user!.id,
+        user_id: req.user?.id ?? null,
+        guest_email: req.user ? null : (guest_email ?? null),
         status: 'pending',
         total_amount,
         shipping_address,

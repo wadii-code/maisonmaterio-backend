@@ -60,9 +60,11 @@ export interface OrderItem {
   products?: Product;
 }
 
+export type Role = 'customer' | 'admin' | 'super_admin' | 'sub_admin';
+
 export interface Profile {
   id: string;
-  role: 'customer' | 'admin';
+  role: Role;
   full_name: string;
   phone?: string;
   address?: string;
@@ -94,7 +96,7 @@ export interface Review {
 export interface AuthUser {
   id: string;
   email: string;
-  role: 'customer' | 'admin';
+  role: Role;
 }
 
 declare global {

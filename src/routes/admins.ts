@@ -160,7 +160,7 @@ router.put('/:id', async (req: Request, res: Response) => {
     const { full_name, role, password } = parsed.data;
 
     // A super_admin cannot demote themselves — would lock them out.
-    if (id === req.user!.id && role && role !== 'super_admin' && role !== 'admin') {
+    if (id === req.user!.id && role && role !== 'super_admin') {
       res.status(400).json({ error: 'You cannot change your own role.' });
       return;
     }
