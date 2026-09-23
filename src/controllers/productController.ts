@@ -126,15 +126,20 @@ export async function getProducts(req: Request, res: Response): Promise<void> {
   }
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function getProduct(req: Request, res: Response): Promise<void> {
   try {
     const { id } = req.params;
+
+    // Public URLs are slug-based; UUIDs still resolve so older links keep working.
+    const lookupColumn = UUID_RE.test(id) ? 'id' : 'slug';
 
     // Fetch product with category & room joins (these have proper FKs)
     const { data: product, error } = await supabaseAdmin
       .from('products')
       .select('*, categories(name, slug), rooms(name, slug)')
-      .eq('id', id)
+      .eq(lookupColumn, id)
       .maybeSingle();
 
     if (error) {
@@ -157,7 +162,7 @@ export async function getProduct(req: Request, res: Response): Promise<void> {
     const { data: reviews } = await supabaseAdmin
       .from('reviews')
       .select('id, rating, comment, created_at, user_id, status')
-      .eq('product_id', id)
+      .eq('product_id', product.id)
       .eq('status', 'published')
       .order('created_at', { ascending: false });
 
