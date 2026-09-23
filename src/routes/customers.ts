@@ -41,38 +41,75 @@ router.get('/', authMiddleware, adminMiddleware, async (_req: Request, res: Resp
   }
 });
 
+// Revenue days are Casablanca calendar days, whatever TZ the server runs in
+// (Vercel is UTC, local dev is UTC+1).
+const SHOP_TZ = 'Africa/Casablanca';
+const shopDay = new Intl.DateTimeFormat('en-CA', {
+  timeZone: SHOP_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+});
+const toShopDay = (d: Date) => shopDay.format(d); // YYYY-MM-DD
+const DAY_MS = 86_400_000;
+
 router.get('/revenue', authMiddleware, adminMiddleware, async (req: Request, res: Response) => {
   try {
     const { period = '7d' } = req.query;
-    const days = period === '30d' ? 30 : period === '90d' ? 90 : 7;
-    const since = new Date();
-    since.setDate(since.getDate() - days);
-    since.setHours(0, 0, 0, 0);
+    const monthly = period === '12m';
+    const today = toShopDay(new Date());
+    const todayUtc = new Date(`${today}T00:00:00Z`);
+
+    // Build the bucket keys, oldest first, always ending with today / this month.
+    const keys: string[] = [];
+    if (monthly) {
+      for (let i = 11; i >= 0; i--) {
+        const d = new Date(Date.UTC(todayUtc.getUTCFullYear(), todayUtc.getUTCMonth() - i, 1));
+        keys.push(d.toISOString().slice(0, 7));
+      }
+    } else {
+      const days = period === '30d' ? 30 : period === '90d' ? 90 : 7;
+      for (let i = days - 1; i >= 0; i--) {
+        keys.push(new Date(todayUtc.getTime() - i * DAY_MS).toISOString().slice(0, 10));
+      }
+    }
+    const buckets: Record<string, number> = Object.fromEntries(keys.map(k => [k, 0]));
+
+    // One day of slack covers the TZ offset; the bucket check below trims the edge.
+    const firstDay = monthly ? `${keys[0]}-01` : keys[0];
+    const since = new Date(new Date(`${firstDay}T00:00:00Z`).getTime() - DAY_MS);
 
     // Same rule as dashboard total: only shipped or delivered orders count.
-    const { data, error } = await supabaseAdmin
-      .from('orders')
-      .select('total_amount, created_at, status')
-      .gte('created_at', since.toISOString())
-      .in('status', ['shipped', 'delivered'])
-      .order('created_at', { ascending: true });
+    const REVENUE_STATUSES = ['shipped', 'delivered'];
+    const [{ data, error }, { data: lastSale, error: lastError }] = await Promise.all([
+      supabaseAdmin
+        .from('orders')
+        .select('total_amount, created_at, status')
+        .gte('created_at', since.toISOString())
+        .in('status', REVENUE_STATUSES)
+        .order('created_at', { ascending: true }),
+      // Lets the chart say when the last sale was when a period is empty.
+      supabaseAdmin
+        .from('orders')
+        .select('created_at')
+        .in('status', REVENUE_STATUSES)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
 
     if (error) throw error;
+    if (lastError) throw lastError;
 
-    // Bucket by day
-    const buckets: Record<string, number> = {};
-    for (let i = 0; i < days; i++) {
-      const d = new Date(since);
-      d.setDate(d.getDate() + i);
-      buckets[d.toISOString().slice(0, 10)] = 0;
-    }
     for (const order of data ?? []) {
-      const day = order.created_at.slice(0, 10);
-      if (day in buckets) buckets[day] += Number(order.total_amount);
+      const day = toShopDay(new Date(order.created_at));
+      const key = monthly ? day.slice(0, 7) : day;
+      if (key in buckets) buckets[key] += Number(order.total_amount);
     }
 
     const series = Object.entries(buckets).map(([date, revenue]) => ({ date, revenue }));
-    res.json({ series, total: series.reduce((s, p) => s + p.revenue, 0) });
+    res.json({
+      series,
+      total: series.reduce((s, p) => s + p.revenue, 0),
+      last_sale_date: lastSale ? toShopDay(new Date(lastSale.created_at)) : null,
+    });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch revenue' });
   }
