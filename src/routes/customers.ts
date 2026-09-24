@@ -41,8 +41,7 @@ router.get('/', authMiddleware, adminMiddleware, async (_req: Request, res: Resp
   }
 });
 
-// Revenue days are Casablanca calendar days, whatever TZ the server runs in
-// (Vercel is UTC, local dev is UTC+1).
+// Bucket by Casablanca calendar day whatever the server TZ (Vercel runs in UTC).
 const SHOP_TZ = 'Africa/Casablanca';
 const shopDay = new Intl.DateTimeFormat('en-CA', {
   timeZone: SHOP_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
@@ -57,7 +56,6 @@ router.get('/revenue', authMiddleware, adminMiddleware, async (req: Request, res
     const today = toShopDay(new Date());
     const todayUtc = new Date(`${today}T00:00:00Z`);
 
-    // Build the bucket keys, oldest first, always ending with today / this month.
     const keys: string[] = [];
     if (monthly) {
       for (let i = 11; i >= 0; i--) {
@@ -85,7 +83,6 @@ router.get('/revenue', authMiddleware, adminMiddleware, async (req: Request, res
         .gte('created_at', since.toISOString())
         .in('status', REVENUE_STATUSES)
         .order('created_at', { ascending: true }),
-      // Lets the chart say when the last sale was when a period is empty.
       supabaseAdmin
         .from('orders')
         .select('created_at')
